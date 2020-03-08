@@ -7,7 +7,6 @@ library(RSelenium)
 library(wdman)
 library(tidyverse)
 
-print("Here")
 server <- chrome(port = 4560L, verbose = FALSE, version = "80.0.3987.106")
 rd <- remoteDriver(browser = "chrome", port = 4560L)
 rd$open(silent = TRUE)
