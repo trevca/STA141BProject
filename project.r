@@ -6,9 +6,13 @@ library(rvest)
 library(RSelenium)
 library(wdman)
 library(tidyverse)
+library(tm)
+library(wordcloud)
+library(RColorBrewer)
+library(stringr)
 
-sv <- chrome(port = 4565L, verbose = FALSE, version = "80.0.3987.106")
-rd <- remoteDriver(browser = "chrome", port = 4565L)
+sv <- chrome(port = 4564L, verbose = FALSE, version = "80.0.3987.106")
+rd <- remoteDriver(browser = "chrome", port = 4564L)
 rd$open(silent = TRUE)
 
 convertUpvotes = function(u) {
@@ -31,13 +35,53 @@ convertUpvotes = function(u) {
 ui <- fluidPage(
   textInput(inputId = "redditPage","Enter SubReddit Title"),
   actionButton("start", "Go!"),
-  tableOutput("table"),
-  textOutput("text")
+  sliderInput("min",
+              "Minimum :",
+              min = 0,  max = 1500, value = 100),
+  sliderInput("max",
+              "Maximum :",
+              min = 100,  max = 1600,  value = 100),
+  plotOutput('wordcloud'),
+  plotOutput('histfreq'),
+  tableOutput("table")
 )
 
 server <- function(input, output) {
   
   v = reactiveValues(data = NULL, text = NULL)
+  
+  words = reactive({
+    dat = v$data
+    dat$Content = str_replace_all(dat$Content,' No Text','notext')
+    dat2 = dat %>% filter(Upvotes >= input$min) %>% filter(Upvotes <= input$max)
+    textm = dat2$Content
+    docs <- Corpus(VectorSource(textm))
+    #docs
+    #inspect(docs)
+    toSpace <- content_transformer(function (x , pattern ) gsub(pattern, " ", x))
+    docs <- tm_map(docs, toSpace, "/")
+    docs <- tm_map(docs, toSpace, "@")
+    docs <- tm_map(docs, toSpace, "\\|")
+    # Convert the text to lower case
+    docs <- tm_map(docs, content_transformer(tolower))
+    # Remove numbers
+    docs <- tm_map(docs, removeNumbers)
+    # Remove English common stopwords
+    docs <- tm_map(docs, removeWords, stopwords("english"))
+    # Remove your own stop word
+    # specify your stopwords as a character vector
+    docs <- tm_map(docs, removeWords, c("I'm")) 
+    # Remove the punctuations
+    docs <- tm_map(docs, removePunctuation)
+    # Eliminate extra white spaces
+    docs <- tm_map(docs, stripWhitespace)
+    # Text stemming
+    # docs <- tm_map(docs, stemDocument)
+    dtm <- TermDocumentMatrix(docs)
+    m <- as.matrix(dtm)
+    v <- sort(rowSums(m),decreasing=TRUE)
+    data.frame(word = names(v),freq=v) %>% filter(word != "notext")
+  })
 
   observeEvent(input$start, {
     v$text = "Loading..."
@@ -98,19 +142,28 @@ server <- function(input, output) {
     }
     lengths = c(length(titles), length(upvotes), length(content), length(pic))
     table = data.frame(Title = titles, Upvotes = upvotes, Content = content, Pics = pic, Promoted = promoted)
+    table$Title = as.character(table$Title)
+    table$Content = as.character(table$Content)
     write.csv(table, "~/newTable.csv")
     v$data = table
     v$text = NULL
   })
   
+  output$wordcloud = renderPlot({
+    wordcloud(words = words()$word, freq = words()$freq, min.freq = 1,
+              max.words=200, random.order=FALSE, rot.per=0.35, 
+              colors=brewer.pal(8, "Dark2"))
+  })
+  
+  output$histfreq = renderPlot({
+    barplot(words()$freq[1:10], las = 2, names.arg = words()$word[1:10],
+            col ="lightblue", main ="Most frequent words",
+            ylab = "Word frequencies")
+  })
+  
   output$table = renderTable({
     if(is.null(v$data)) return()
     v$data
-  })
-  
-  output$text = renderText({
-    if(!is.null(v$data)) return()
-    ""
   })
   
 }
